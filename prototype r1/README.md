@@ -160,7 +160,6 @@ gridguard/
 ├── logs/
 │   └── incident_log.csv
 │
-├── requirements.txt
 └── README.md
 ```
 
@@ -182,18 +181,26 @@ This aligns with smart-grid cybersecurity guidance that emphasizes device authen
 ### Prerequisites
 
 - Python 3.8+
-- VS Code with Wokwi extension
+- VS Code with:
+  - Wokwi extension
+  - PlatformIO IDE extension
 - Required Python packages:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-`requirements.txt` should contain:
+Create a file named `requirements.txt` in the repo root with the following content:
 
 ```text
 streamlit
 pandas
+```
+
+Then install the dependencies:
+
+```bash
+pip install -r requirements.txt
 ```
 
 ### Step 1 — Run Wokwi Simulations
