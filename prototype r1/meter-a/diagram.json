@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "author": "Sandhiya Priyadharshini Ganesh",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-devkit-c-v4", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-dht22", "id": "dht1", "top": -66.9, "left": -91.8, "attrs": {} },
+    {
+      "type": "wokwi-resistor",
+      "id": "r1",
+      "top": 62.4,
+      "left": -154.15,
+      "rotate": 90,
+      "attrs": { "value": "10000" }
+    },
+    { "type": "wokwi-potentiometer", "id": "pot1", "top": -183.7, "left": 76.6, "attrs": {} },
+    {
+      "type": "board-ssd1306",
+      "id": "oled1",
+      "top": 223.94,
+      "left": -105.37,
+      "attrs": { "i2cAddress": "0x3c" }
+    },
+    {
+      "type": "wokwi-rgb-led",
+      "id": "rgb1",
+      "top": -111.2,
+      "left": -18.1,
+      "attrs": { "common": "cathode" }
+    },
+    {
+      "type": "wokwi-buzzer",
+      "id": "bz1",
+      "top": 268.8,
+      "left": 163.2,
+      "rotate": 180,
+      "attrs": { "volume": "0.1" }
+    },
+    {
+      "type": "wokwi-pushbutton",
+      "id": "btn1",
+      "top": 284.6,
+      "left": 19.2,
+      "attrs": { "color": "red", "xray": "1" }
+    }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+    [ "dht1:VCC", "esp:3V3", "red", [ "v28.8", "h67.2", "v-48" ] ],
+    [ "esp:GND.1", "dht1:GND", "black", [ "h0" ] ],
+    [ "esp:15", "dht1:SDA", "green", [ "v0" ] ],
+    [ "r1:1", "dht1:VCC", "green", [ "h0" ] ],
+    [ "r1:2", "dht1:SDA", "green", [ "h0" ] ],
+    [ "esp:GND.1", "pot1:GND", "black", [ "h0" ] ],
+    [ "esp:3V3", "pot1:VCC", "green", [ "h0" ] ],
+    [ "esp:34", "pot1:SIG", "green", [ "h0" ] ],
+    [ "oled1:VCC", "esp:3V3", "red", [ "v0" ] ],
+    [ "oled1:GND", "esp:GND.1", "black", [ "v0" ] ],
+    [ "oled1:SCL", "esp:22", "green", [ "v0" ] ],
+    [ "oled1:SDA", "esp:21", "green", [ "v0" ] ],
+    [ "esp:GND.1", "rgb1:COM", "black", [ "h0" ] ],
+    [ "rgb1:R", "esp:26", "green", [ "v0" ] ],
+    [ "rgb1:G", "esp:25", "green", [ "v0" ] ],
+    [ "rgb1:B", "esp:33", "green", [ "v0" ] ],
+    [ "esp:GND.3", "bz1:1", "black", [ "h0" ] ],
+    [ "bz1:2", "esp:27", "red", [ "v0" ] ],
+    [ "esp:GND.3", "btn1:2.r", "black", [ "h0" ] ],
+    [ "btn1:1.l", "esp:4", "green", [ "h0" ] ]
+  ],
+  "dependencies": {}
+}

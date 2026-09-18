@@ -1,0 +1,37 @@
+                    Wokwi + VS Code Prototype
+┌─────────────────────────────────────────────────────────────┐
+│                                                             │
+│  ESP32 Smart Meter A             ESP32 Smart Meter B        │
+│  ┌─────────────────┐             ┌─────────────────┐        │
+│  │ DHT22           │             │ DHT22           │        │
+│  │ Temperature     │             │ Temperature     │        │
+│  │ Potentiometer   │             │ Potentiometer   │        │
+│  │ Voltage/Current │             │ Voltage/Current │        │
+│  │ OLED Display    │             │ OLED Display    │        │
+│  │ LED + Buzzer    │             │ LED + Buzzer    │        │
+│  │ Push Button     │             │ Push Button     │        │
+│  └────────┬────────┘             └────────┬────────┘        │
+└───────────┼────────────────────────────────┼────────────────┘
+            │ Simulated Wi-Fi / MQTT telemetry
+            │ JSON: meter_id, readings, timestamp, sequence, HMAC
+            ▼
+┌─────────────────────────────────────────────────────────────┐
+│                 Substation Security Gateway                 │
+│                    Python: FastAPI / Flask                  │
+│                                                             │
+│ MQTT Broker → Validate Meter ID → Verify HMAC → Check       │
+│ timestamp/sequence → Rule/ML anomaly detection → Alert      │
+│                                      │                      │
+│                                      ▼                      │
+│                          SQLite / PostgreSQL                │
+│                    Telemetry + Security Event Logs          │
+└─────────────────────────────────────┬───────────────────────┘
+                                      │ REST API
+                                      ▼
+┌─────────────────────────────────────────────────────────────┐
+│                    GridGuard Web Dashboard                  │
+│                         Streamlit                           │
+│                                                             │
+│ Live Meter Values | Asset Inventory | Security Alerts       │
+│ Attack Demo Controls | Isolate Meter | CSV/PDF Reports      │
+└─────────────────────────────────────────────────────────────┘
