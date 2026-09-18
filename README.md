@@ -145,7 +145,7 @@ The initial prototype is implemented using Wokwi inside VS Code.
 ```text
 gridguard/
 │
-├── prototype-wokwi/
+├── prototype r1/
 │   ├── meter-a/
 │   │   ├── meter_a.ino
 │   │   ├── diagram.json
