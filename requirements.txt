@@ -1,2 +1,5 @@
-streamlit
+streamlit>=1.37
 pandas
+plotly>=5.20
+reportlab
+paho-mqtt>=2.0

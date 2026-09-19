@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.pyc
+
+# Virtual environment
+.venv/
+
+# Runtime data created by the app
+logs/
+database/*.db
+
+# PlatformIO build output
+.pio/

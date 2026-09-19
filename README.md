@@ -1,293 +1,203 @@
-# GridGuard
+GridGuard
 
-## Secure Smart Meter and Substation Monitoring System
+Secure smart meter and substation monitoring system
 
-GridGuard is a hardware-in-the-loop smart-grid cybersecurity project that simulates smart meters, monitors their telemetry, detects suspicious behavior, and provides a web dashboard for security monitoring and incident response.
+GridGuard is a smart-grid cybersecurity prototype. Simulated ESP32 smart meters send telemetry to a security gateway. The gateway checks every packet, detects attacks and faulty meters, isolates a suspicious meter, and logs everything. A web dashboard shows the live grid, the alerts, and the meter inventory.
 
-The prototype uses simulated ESP32 smart-meter devices in Wokwi and VS Code. In the final implementation, the simulated devices will be replaced with physical ESP32 boards and low-voltage sensors.
+Safety note: GridGuard is a defensive, educational prototype. All attacks are simulated inside the gateway software on one machine. It does not jam Wi-Fi, impersonate devices on a real network, disrupt anything, or switch real electrical loads.
 
-> Safety note: GridGuard is a defensive educational prototype. It uses only simulated attacks in an isolated lab environment. It does not perform Wi-Fi jamming, device impersonation, network disruption, or real electrical switching.
+Problem
 
----
+Smart meters continuously send voltage, current, power and temperature readings to a substation or control centre. If an unauthorised device injects data, a message is altered or replayed, or a meter starts reporting abnormal values, the operator must notice quickly and isolate that meter without shutting down the healthy ones.
 
-## Problem Statement
+GridGuard demonstrates this with two simulated meters, a gateway that validates and monitors their data, and an operator dashboard.
 
-Modern smart grids depend on connected smart meters, sensors, gateways, and substations. These devices continuously exchange power-consumption and operational data.
+What it does
+Accepts telemetry only from registered meters (device allow-list).
+Verifies each message with an HMAC-SHA256 signature.
+Rejects replayed messages (sequence number and timestamp checks) and floods (rate limit).
+Flags abnormal readings: voltage, current, power and temperature limits, sudden spikes, power that does not match voltage × current, and cumulative energy that goes backwards.
+Isolates a faulty meter automatically (or on the operator's command) while healthy meters keep running.
+Stores every event with time, meter, severity, reason, raw packet, source and meter state.
+Shows all of this in a live dashboard, with CSV and PDF reports.
+Architecture
+text
+ Simulated ESP32 meters (Wokwi)          Built-in simulator + Attack simulation page
+   Meter A (MTR-001)                                   |
+   Meter B (MTR-002)                                   |
+        |  JSON telemetry                              |
+        |  (serial output pasted into the gateway;     |
+        |   MQTT listener available, not yet used      |
+        |   by the firmware)                           |
+        +---------------------+------------------------+
+                              v
+              Gateway engine  (gateway/core.py)
+   allow-list -> isolation check -> rate limit -> HMAC -> replay
+        -> plausibility and threshold rules -> auto-isolation
+                              |
+                              v
+                 SQLite database  (logs/gridguard.db)
+                              |
+                              v
+              Streamlit dashboard  (dashboard/app.py)
+Quick start
 
-If an unauthorized device sends data, a message is altered, an old message is replayed, or a meter begins transmitting abnormal readings, the grid operator needs to detect the issue quickly and isolate the affected device without interrupting healthy devices.
+Requirements: Python 3.9 or newer.
 
-GridGuard addresses this problem through simulated meter telemetry, message validation, anomaly detection, incident logging, and a live operator dashboard.
+bash
+pip install -r requirements.txt
+streamlit run dashboard/app.py
 
----
+Run the command from the repository root. The dashboard opens at http://localhost:8501. A built-in simulator is switched on by default, so both meters show live data immediately.
 
-## Objectives
+Demo flow
+Overview: both meters online, live charts.
+Attack simulation: with Meter B selected, run Unauthorized Meter, Tampered Message and Replay Attack. Each is rejected, and the page shows the reason.
+Run Compromised Meter. The gateway flags the extreme readings and isolates Meter B while Meter A keeps running.
+Alerts: open an event to see the raw packet behind it.
+Meters: press Restore to service to bring Meter B back.
+Reports: download the CSV files or create the PDF report.
+Using the Wokwi meters
 
-- Simulate two ESP32-based smart meters.
-- Collect voltage, current, power, energy, and temperature telemetry.
-- Validate smart-meter identity before accepting data.
-- Protect message integrity using HMAC signatures.
-- Detect replayed messages using timestamps and sequence numbers.
-- Detect suspicious sensor values and abnormal message rates.
-- Create a live web dashboard for grid operators.
-- Trigger visible alerts through simulated LEDs and buzzers.
-- Isolate a suspicious meter while continuing to monitor healthy meters.
-- Generate downloadable incident logs and reports.
+Turn off Use built-in simulator in the sidebar. Copy a JSON line from a Wokwi serial monitor and paste it into the box at the bottom of the Attack simulation page, or run the command-line gateway in a second terminal:
 
----
+bash
+python gateway/gateway_r2.py                    # paste JSON lines from the serial monitors
+python gateway/gateway_r2.py --simulate         # headless simulated traffic
+python gateway/gateway_r2.py --strict           # reject unsigned packets
+python gateway/gateway_r2.py --mqtt HOST --topic YOUR/UNIQUE/TOPIC   # MQTT (untested)
 
-## System Architecture
+The command-line gateway and the dashboard use the same database, so events appear in the dashboard either way.
 
-```text
-Wokwi ESP32 Meter A ──┐
-                      ├── MQTT / JSON Telemetry ──> Python Gateway
-Wokwi ESP32 Meter B ──┘                                  │
-                                                         ├── Security Validation
-                                                         ├── Anomaly Detection
-                                                         ├── Incident Logging
-                                                         └── SQLite / PostgreSQL
-                                                                  │
-                                                                  ▼
-                                                       Streamlit Web Dashboard
-```
+Tests
+bash
+python -m pytest -q
+Simulated attack scenarios
 
----
+All scenarios run from the Attack simulation page.
 
-## How It Works
+Scenario	What is simulated	Gateway response
+Unauthorized Meter	A device with ID MTR-999 sends telemetry	Rejected, critical alert
+Tampered Message	A valid packet is edited after it was signed	Rejected, HMAC mismatch
+Replay Attack	An earlier genuine packet is sent again	Rejected, sequence already used
+Compromised Meter	A meter with a valid key sends extreme values (3 packets)	Flagged, meter auto-isolated
+Energy Rollback	A meter's cumulative energy reading goes backwards	Flagged as a high-severity anomaly
+Message Flood	15 packets in a burst	Rate-limit alert
+Normal packet	A correctly signed reading within limits	Accepted, no alert
+Security controls
+Control	Rule	Result
+Device allow-list	Only MTR-001 and MTR-002 may send data	Reject, critical
+Message signature	HMAC-SHA256 over the packet fields, one key per meter	Reject, critical
+Replay protection	Sequence number must increase; timestamp within 30 s	Reject, high
+Rate limit	More than 8 packets in 5 s from one meter	Reject, high
+Sensor plausibility	Voltage 0–1000 V, current up to 100 A, temperature −40 to 150 °C	Reject, critical
+Voltage	Warn outside 216–244 V, critical outside 200–255 V	Flag
+Current	Warn above 3.5 A, critical above 8 A	Flag
+Temperature	Warn above 33 °C, critical above 42 °C	Flag
+Power	Warn above 0.8 kW, critical above 1.8 kW	Flag
+Power consistency	Reported kW may not exceed voltage × current	Flag, high
+Energy rollback	Cumulative energy_wh may not decrease	Flag, high
+Sudden spike	Power above 2.5× the recent average	Flag, medium
+Meter self-alert	Meter sends "alert": true	Flag, medium
+Auto-isolation	3 high or critical packets from one meter within 60 s	Meter isolated
 
-1. Two simulated ESP32 devices act as smart meters.
-2. Each meter collects or simulates sensor readings:
-   - Voltage
-   - Current
-   - Power
-   - Energy consumption
-   - Temperature
-3. Each meter sends a signed JSON telemetry message to the gateway.
-4. The gateway verifies:
-   - Whether the meter ID is registered.
-   - Whether the HMAC signature is valid.
-   - Whether the timestamp is recent.
-   - Whether the sequence number has already been used.
-   - Whether the readings fall within expected limits.
-5. Valid data is stored and displayed in the dashboard.
-6. Suspicious data creates a security alert and forensic log.
-7. The gateway isolates the suspicious meter by rejecting further telemetry from it.
-8. The meter LED and buzzer indicate the isolated state.
-9. The operator can review alerts and export incident reports.
+Notes on the design:
 
----
+Packets that fail authentication never count toward isolation. Otherwise an attacker could get a healthy meter isolated by sending fake packets in its name.
+An isolated meter keeps sending, and the gateway drops its packets and counts them as blocked. An operator can restore it from the Meters page.
+The thresholds are demo values based on a 230 V supply. Real values would come from the utility's own standards.
+Message format
 
-## Simulated Attack Scenarios
+Telemetry is a JSON line. Fields marked optional can be left out (the Review 1 firmware sends only the first seven).
 
-All attack scenarios are safe simulations triggered using a push button or software toggle.
+json
+{"meter_id":"MTR-001","seq":42,"ts":1789800000,"temp_c":28.1,"voltage_v":230.2,"current_a":1.24,
+ "power_kw":0.29,"alert":false,"energy_wh":15.62,"hmac":"<64 hex characters>"}
 
-| Scenario | Simulation | Gateway Response |
-|---|---|---|
-| Unauthorized Meter | Sends an unregistered meter ID | Rejects packet and raises critical alert |
-| Invalid HMAC | Sends a deliberately incorrect message signature | Rejects altered message |
-| Replay Attack | Reuses an earlier sequence number or timestamp | Rejects duplicated packet |
-| Sensor Tampering | Sends impossible or extreme readings | Raises anomaly alert |
-| Message Flooding | Sends readings above the allowed rate | Raises rate-limit alert |
-| Device Isolation | Gateway blocks an unsafe meter | Marks meter as isolated and ignores new data |
+seq, ts, energy_wh and hmac are optional. The signature is HMAC-SHA256 over the printed text of these fields, joined by |:
 
----
+meter_id|seq|ts|temp_c|voltage_v|current_a|power_kw|alert|energy_wh
 
-## Prototype Hardware Simulation
+Fields that are absent are signed as an empty string. Signing the printed text (for example 28.1, not the number 28.1) avoids float-formatting differences between C++ and Python. Demo keys are in gateway/core.py and can be overridden with the environment variables GG_KEY_MTR001 and GG_KEY_MTR002. Real keys must never be committed to the repository.
 
-The initial prototype is implemented using Wokwi inside VS Code.
+By default the gateway still accepts unsigned packets, so the Review 1 firmware keeps working. Turn on Require signed packets in the sidebar (or use --strict) to reject them.
 
-### Simulated Components
-
-- ESP32 development board
-- DHT22 temperature sensor
-- Potentiometer for simulated voltage/current input
-- OLED display
-- RGB LED
-- Piezo buzzer
-- Push button for attack-mode simulation
-
-### Final Hardware Components
-
-- 2 or 3 ESP32 development boards
-- INA219 current and voltage sensor or PZEM-004T module
-- DHT11 or DHT22 temperature sensor
-- OLED display
-- RGB LED
-- Buzzer
-- Push button
-- Optional Raspberry Pi gateway
-- Optional RFID RC522 module for technician authentication
-
-> The final system will use only low-voltage sensors. It will not connect directly to mains electricity.
-
----
-
-## Technology Stack
-
-| Layer | Technologies |
-|---|---|
-| Hardware Simulation | Wokwi, VS Code |
-| Embedded Programming | Arduino C/C++, ESP32 |
-| Device Communication | MQTT, JSON |
-| MQTT Broker | Mosquitto |
-| Backend Gateway | Python, FastAPI or Flask |
-| Message Security | HMAC-SHA256, timestamps, sequence numbers |
-| Data Processing | Python, Pandas |
-| Anomaly Detection | Rule-based thresholds, Scikit-learn Isolation Forest |
-| Database | SQLite for prototype, PostgreSQL for final version |
-| Web Dashboard | Streamlit |
-| Reporting | CSV export, ReportLab PDF generation |
-| Version Control | Git and GitHub |
-
----
-
-## Repository Structure
-
-```text
-gridguard/
-│
-├── prototype r1/
-│   ├── meter-a/
-│   │   ├── meter_a.ino
-│   │   ├── diagram.json
-│   │   └── wokwi.toml
-│   │
+Dashboard pages
+Page	Contents
+Overview	Meters online, grid load, packet counters, meter cards, live charts (power, current, voltage, temperature, energy), recent events
+Alerts	Filterable event table, charts by severity, type and time, event details with the raw packet
+Meters	Asset inventory, isolate and restore buttons, unregistered devices seen, list of gateway rules
+Attack simulation	One-click attack scenarios with the gateway's verdict, paste box for Wokwi serial output
+Reports	CSV export of events and telemetry, PDF incident report, data reset
+Project structure
+text
+GridGuard/
+├── prototype r1/                 # Wokwi and PlatformIO projects for the two simulated meters
+│   ├── meter-a/                  # src/main.cpp, diagram.json, wokwi.toml, platformio.ini
 │   ├── meter-b/
-│   │   ├── meter_b.ino
-│   │   ├── diagram.json
-│   │   └── wokwi.toml
-│   │
 │   └── README.md
-│
 ├── gateway/
-│   ├── app.py
-│   ├── mqtt_client.py
-│   ├── validator.py
-│   ├── anomaly_detector.py
-│   ├── isolation_manager.py
-│   └── config.py
-│
+│   ├── core.py                   # security engine: checks, anomaly rules, isolation, SQLite
+│   ├── simulator.py              # normal meter traffic and the attack scenarios
+│   ├── gateway_r2.py             # command-line gateway (serial paste, simulator, MQTT)
+│   ├── gateway_r1.py             # Review 1 gateway
+│   └── __init__.py
 ├── dashboard/
-│   ├── streamlit_app.py
-│   └── pages/
-│       ├── 1_Live_Grid.py
-│       ├── 2_Asset_Inventory.py
-│       ├── 3_Security_Alerts.py
-│       └── 4_Incident_Reports.py
-│
-├── database/
-│   ├── schema.sql
-│   └── gridguard.db
-│
-├── reports/
-│   └── generated_reports/
-│
-├── docs/
-│   ├── architecture.png
-│   ├── threat_model.md
-│   └── screenshots/
-│
+│   ├── app.py                    # Streamlit dashboard
+│   ├── theme.py                  # styling and HTML helpers
+│   ├── reporting.py              # PDF report
+│   └── __init__.py
+├── tests/test_core.py
+├── .streamlit/config.toml        # dashboard theme
+├── architecture.txt
 ├── requirements.txt
 └── README.md
-```
 
----
+logs/gridguard.db is created when the app first runs and is not committed.
 
-## Security Controls
+Meter hardware (simulated)
 
-### Device Allow-List
+Each simulated meter is an ESP32 running in Wokwi inside VS Code, with:
 
-Only registered meter IDs are permitted to submit telemetry.
+DHT22 temperature sensor
+Potentiometer for simulated voltage and current
+SSD1306 OLED display
+RGB LED and buzzer for alerts
+Push button to simulate an alert condition
 
-### HMAC Message Authentication
+The firmware has demo scenarios (normal, slightly high power, extreme power spike, unauthorised meter) chosen with DEMO_SCENARIO. It prints one JSON line every 2 seconds. A future version will use real ESP32 boards with low-voltage sensors (INA219 or PZEM-004T). The system will never connect directly to mains electricity.
 
-Each meter signs telemetry with an HMAC-SHA256 secret key. The gateway calculates and compares the expected signature before accepting the message.
+Technology
+Layer	Technology
+Meter simulation	Wokwi, VS Code, PlatformIO, Arduino C++ on ESP32
+Gateway	Python, SQLite
+Message security	HMAC-SHA256, sequence numbers, timestamps
+Anomaly detection	Rule-based thresholds and consistency checks
+Dashboard	Streamlit, Plotly, Pandas
+Reports	CSV, ReportLab (PDF)
+Current status and limits
+Feature	Status
+Allow-list, HMAC, replay protection, rate limit, anomaly rules, isolation	Done in the gateway
+Dashboard, attack simulation, CSV and PDF reports	Done
+Wokwi meters signing packets	Not yet. The firmware sends unsigned JSON without seq, ts or energy_wh
+Connection from Wokwi to the gateway	Manual (copy and paste). The MQTT listener is written but untested
+Isolation switching the meter's LED and buzzer	Not yet. The gateway does not send commands back to meters
+Source address in the event log	Stores the serial port, MQTT topic or operator, not a real client IP
+Machine-learning anomaly detection, TLS, dashboard login	Planned
 
-### Replay Protection
+The attacks and the normal traffic in the dashboard are generated by the built-in simulator, so signing and replay protection are demonstrated there, not by the Wokwi meters yet.
 
-Every telemetry message includes a timestamp and sequence number. The gateway rejects old timestamps and repeated sequence numbers.
-
-### Anomaly Detection
-
-The gateway checks readings for unusual behavior, including:
-
-- Sudden current or power spikes.
-- Unrealistic voltage readings.
-- Temperature values outside safe limits.
-- Energy values that decrease unexpectedly.
-- Excessive telemetry transmission rate.
-
-### Incident Logging
-
-Each rejected packet or detected anomaly is stored with:
-
-- Timestamp
-- Meter ID
-- Network address
-- Alert type
-- Alert severity
-- Validation failure reason
-- Sensor values
-- Isolation status
-
-### Device Isolation
-
-When a meter is marked as suspicious, the gateway blocks its telemetry. Healthy meters remain active.
-
----
-
-## Dashboard Features
-
-- Live voltage, current, power, energy, and temperature charts.
-- Smart-meter asset inventory.
-- Meter health and connection status.
-- Real-time security alert feed.
-- Alert severity classification.
-- Detailed incident evidence.
-- Meter isolation controls.
-- Downloadable CSV event logs.
-- PDF incident report generation.
-
----
-
-## First Review Prototype Scope
-
-The first review demonstrates:
-
-- Two simulated ESP32 smart meters in Wokwi.
-- Simulated temperature and electrical readings.
-- Serial output or MQTT-style JSON telemetry.
-- A basic Python gateway that receives and validates telemetry.
-- A simple Streamlit dashboard with live/simulated readings.
-- One safe attack scenario: invalid meter ID or unrealistic sensor value.
-- Alert generation and device-isolation simulation.
-
----
-
-## Future Enhancements
-
-- Replace Wokwi devices with physical ESP32 hardware.
-- Add INA219 or PZEM-004T sensor integration.
-- Add MQTT over TLS.
-- Add role-based dashboard login.
-- Add RFID-based technician authorization.
-- Train an ML classifier using simulated normal and anomalous telemetry.
-- Add email or Telegram incident notifications.
-- Deploy the dashboard using Docker and cloud infrastructure.
-- Add digital-twin visualization of the grid topology.
-- Add tamper detection using enclosure-open sensors.
-
----
-
-## References
-
-- NISTIR 7628 Rev. 1: Guidelines for Smart Grid Cybersecurity.
-- NIST Cybersecurity Framework Smart Grid Profile.
-- CISA guidance for industrial control system security and incident response.
-
----
-
-## Contributors
-
-- Sandhiya Priyadharshini Ganesh
-- Harshita Das 
-- Tarunya Modi
+Future work
+Sign packets in the ESP32 firmware and add seq, ts and energy_wh.
+Send telemetry over MQTT (with TLS) instead of copying serial output.
+Send an isolation command back to the meter to drive its LED and buzzer.
+Train an anomaly model (for example Isolation Forest) on simulated normal and abnormal data.
+Add dashboard login, email or Telegram notifications, and physical boards with INA219 or PZEM-004T sensors.
+References
+NISTIR 7628 Rev. 1: Guidelines for Smart Grid Cybersecurity
+NIST Cybersecurity Framework Smart Grid Profile
+CISA guidance for industrial control system security and incident response
+Contributors
+Sandhiya Priyadharshini Ganesh
+Harshita Das
+Tarunya Modi
