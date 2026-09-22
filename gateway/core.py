@@ -150,7 +150,7 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS telemetry(
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, meter_id TEXT,
     temp_c REAL, voltage_v REAL, current_a REAL, power_kw REAL, energy_wh REAL,
-    seq INTEGER, flagged INTEGER, raw TEXT, reported_wh REAL);
+    seq INTEGER, flagged INTEGER, raw TEXT, reported_wh REAL, source TEXT);
 CREATE INDEX IF NOT EXISTS ix_tel_meter ON telemetry(meter_id, id);
 CREATE TABLE IF NOT EXISTS events(
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts REAL, meter_id TEXT, severity TEXT,
@@ -192,7 +192,8 @@ class GridGuardEngine:
             c.executescript(SCHEMA)
             # databases created by the first Review-2 build lack these columns
             for table, col, decl in (("events", "addr", "TEXT"), ("events", "meter_state", "TEXT"),
-                                     ("telemetry", "reported_wh", "REAL"), ("meters", "reported_wh", "REAL")):
+                                     ("telemetry", "reported_wh", "REAL"), ("telemetry", "source", "TEXT"),
+                                     ("meters", "reported_wh", "REAL")):
                 if col not in [r[1] for r in c.execute(f"PRAGMA table_info({table})")]:
                     c.execute(f"ALTER TABLE {table} ADD COLUMN {col} {decl}")
             for mid in METERS:
@@ -405,9 +406,9 @@ class GridGuardEngine:
             dt = min(now - row["last_seen"], 10.0) if row["last_seen"] else 0.0
             energy = (row["energy_wh"] or 0.0) + power * 1000.0 * dt / 3600.0
             c.execute(
-                "INSERT INTO telemetry(ts,meter_id,temp_c,voltage_v,current_a,power_kw,energy_wh,seq,flagged,raw,reported_wh) "
-                "VALUES(?,?,?,?,?,?,?,?,?,?,?)",
-                (now, meter_id, temp, volt, cur, power, energy, seq, 1 if f else 0, raw[:2000], reported),
+                "INSERT INTO telemetry(ts,meter_id,temp_c,voltage_v,current_a,power_kw,energy_wh,seq,flagged,raw,reported_wh,source) "
+                "VALUES(?,?,?,?,?,?,?,?,?,?,?,?)",
+                (now, meter_id, temp, volt, cur, power, energy, seq, 1 if f else 0, raw[:2000], reported, source),
             )
             if reported is not None and (prev_wh is None or reported >= prev_wh - LIMITS["energy_tolerance"]):
                 c.execute("UPDATE meters SET reported_wh=? WHERE meter_id=?", (reported, meter_id))
@@ -521,9 +522,23 @@ class GridGuardEngine:
         with self._conn() as c:
             counters = {r["key"]: r["value"] for r in c.execute("SELECT * FROM counters")}
             isolated = c.execute("SELECT COUNT(*) FROM meters WHERE status='isolated'").fetchone()[0]
-            online = c.execute("SELECT COUNT(*) FROM meters WHERE status='online'").fetchone()[0]
+            online = c.execute(
+                "SELECT COUNT(*) FROM meters WHERE status='online' AND last_seen IS NOT NULL AND last_seen >= ?",
+                (now - 15,),
+            ).fetchone()[0]
             ev = c.execute(
                 "SELECT severity, action, ts FROM events WHERE action IN ('flagged','rejected')").fetchall()
+            serial_recent = c.execute(
+                "SELECT COUNT(*) FROM telemetry WHERE source='serial' AND ts >= ?",
+                (now - 15,),
+            ).fetchone()[0] + c.execute(
+                "SELECT COUNT(*) FROM events WHERE source='serial' AND ts >= ?",
+                (now - 15,),
+            ).fetchone()[0]
+            unauthorized_recent = c.execute(
+                "SELECT DISTINCT meter_id FROM events WHERE type='unauthorized_device' AND ts >= ?",
+                (now - 30,),
+            ).fetchall()
         recent = [e for e in ev if e["ts"] >= now - 120]
         worst = max((SEV_RANK.get(e["severity"], 0) for e in recent), default=0)
         threat = "ATTACK" if worst >= 3 else "ELEVATED" if worst == 2 else "SECURE"
@@ -533,6 +548,8 @@ class GridGuardEngine:
             accepted=counters.get("accepted", 0), rejected=counters.get("rejected", 0),
             blocked=counters.get("blocked", 0), threats=len(ev), isolated=isolated,
             online=online, threat=threat, load_kw=load,
+            serial_recent=serial_recent,
+            unauthorized_recent=[r[0] for r in unauthorized_recent],
         )
 
     def last_raw(self, meter_id: str) -> str | None:

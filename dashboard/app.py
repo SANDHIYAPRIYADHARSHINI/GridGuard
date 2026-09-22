@@ -56,9 +56,9 @@ with st.sidebar:
     page = st.radio("Navigation", PAGES, label_visibility="collapsed", key="page")
 
     theme.md('<div class="side-h">Data source</div>')
-    sim_on = st.toggle("Use built-in simulator", value=True, key="sim_on",
+    sim_on = st.toggle("Use built-in simulator", value=False, key="sim_on",
                        help="On: the dashboard generates signed, normal telemetry for both meters. "
-                            "Off: it only shows what an external gateway (gateway_r2.py) writes to the database.")
+                            "Off: it shows telemetry received from the external serial bridge or gateway.")
 
     theme.md('<div class="side-h">Refresh</div>')
     auto = st.toggle("Auto-refresh", value=True, key="auto")
@@ -79,8 +79,10 @@ def metric_chart(df: pd.DataFrame, col: str, title: str, unit: str, min_span: fl
         d = df[df.meter_id == mid]
         if d.empty:
             continue
-        c = theme.METER_COL[mid]
-        fig.add_trace(go.Scatter(x=d.dt, y=d[col], name=METERS[mid]["name"], mode="lines", line=dict(color=c, width=1.8),
+        stale = time.time() - float(d.ts.max()) > 12
+        c = "#9aa3ad" if stale else theme.METER_COL[mid]
+        label = f'{METERS[mid]["name"]} (stale)' if stale else METERS[mid]["name"]
+        fig.add_trace(go.Scatter(x=d.dt, y=d[col], name=label, mode="lines", line=dict(color=c, width=1.8),
                                  hovertemplate="%{y:.2f} " + unit))
         bad = d[d.flagged == 1]
         if not bad.empty:
@@ -157,6 +159,10 @@ def page_overview(stats, meters, ev):
     if df.empty:
         theme.empty("No telemetry yet. Turn on the simulator or start gateway_r2.py.")
     else:
+        stale_meters = [METERS[mid]["name"] for mid in METERS
+                        if not df[df.meter_id == mid].empty and time.time() - float(df[df.meter_id == mid].ts.max()) > 12]
+        if stale_meters:
+            st.warning("Stale telemetry: " + ", ".join(stale_meters) + ". The chart is shown in gray until a fresh packet arrives.")
         L = LIMITS
         c1, c2 = st.columns(2, gap="medium")
         with c1:
@@ -350,6 +356,13 @@ def render():
         sim.tick(eng)
     stats, meters = eng.stats(), eng.meters_state()
     ev = eng.events_df(limit=1500)
+    serial_recent = stats.get("serial_recent", 0)
+    if serial_recent:
+        st.sidebar.success(f"Serial bridge: receiving ({serial_recent} packet events in 15 s)")
+    elif not sim_on:
+        st.sidebar.warning("Serial bridge: no packets received in the last 15 s")
+    else:
+        st.sidebar.caption("Serial bridge: not observed while built-in simulator is on")
     theme.header(page, stats)
     hot = None
     if not ev.empty:
@@ -357,6 +370,8 @@ def render():
         if not recent.empty:
             hot = recent.assign(_r=recent.severity.map(SEV_RANK)).sort_values(["_r", "id"], ascending=False).iloc[0].to_dict()
     theme.banner(stats, hot)
+    if stats["unauthorized_recent"]:
+        st.warning("Unauthorized source detected: " + ", ".join(stats["unauthorized_recent"]) + ". Packets were rejected and are shown under Alerts, not live telemetry.")
     PAGE_FN[page](stats, meters, ev)
 
 

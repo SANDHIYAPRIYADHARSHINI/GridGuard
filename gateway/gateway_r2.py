@@ -27,13 +27,14 @@ END = "\033[0m"
 
 def show(v: Verdict) -> None:
     head = f"{COL.get(v.label, '')}{v.label:<8}{END} {v.meter_id or '?':<8}"
+    if v.blocked:
+        print(f"{head} meter is isolated - packet ignored")
+        return
     if not v.findings:
         auth = "signed" if v.authenticated else "unsigned (legacy)"
         print(f"{head} OK · {auth}")
     for f in v.findings:
         print(f"{head} [{f.severity.upper():<8}] {f.type}: {f.reason}")
-    if v.blocked:
-        print(f"{head} meter is isolated - packet ignored")
     if v.isolated_now:
         print(f"\033[91m>>> {v.meter_id} AUTO-ISOLATED\033[0m")
 

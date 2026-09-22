@@ -1,5 +1,5 @@
 // Meter B - Smart Meter MTR-002
-// unauthorized meter with demo scenarios.
+// Unauthorized / Secondary Meter with Demo Scenarios
 #include <Arduino.h>
 #include <DHT.h>
 #include <Wire.h>
@@ -9,7 +9,7 @@
 // CONFIG
 // =============================
 
-const String METER_ID = "MTR-002";
+const String METER_ID = "MTR-999";
 
 const int PIN_DHT = 15;
 const int PIN_POT = 34;
@@ -23,14 +23,15 @@ const int PIN_LED_B = 33;
 // DEMO MODE (HARDCODED VALUES)
 // -----------------------------
 // Set to true for panel demo (hardcoded values).
-// Set to false for live sensor readings.
-#define DEMO_MODE true
+// Set to false for live sensor/random readings.
+#define DEMO_MODE false
+#define RANDOM_VALUES true
 
 // Choose one scenario for demo:
 // 0 = Normal operation
-// 1 = Slightly high power (suspicious but not extreme)
+// 1 = Slightly high power (suspicious)
 // 2 = Extreme power spike (clear anomaly)
-// 3 = Unauthorized / fake meter (you can also change METER_ID to "UNKNOWN")
+// 3 = Unauthorized / fake meter (e.g., set METER_ID = "UNKNOWN")
 #define DEMO_SCENARIO 0
 
 // =============================
@@ -41,15 +42,19 @@ DHT dht(PIN_DHT, DHT22);
 U8G2_SSD1306_128X64_NONAME_F_HW_I2C u8g2(U8G2_R0, U8X8_PIN_NONE);
 
 // =============================
-// STATE
+// STATE & TIMING
 // =============================
 
 bool alertMode = false;
 
-// Button debounce state
+// Button state
 bool lastBtnState = HIGH;
+bool currentBtnState = HIGH;
 unsigned long lastDebounceTime = 0;
-const unsigned long debounceDelay = 50;
+const unsigned long DEBOUNCE_DELAY_MS = 50;
+
+unsigned long lastSend = 0;
+const unsigned long SEND_INTERVAL_MS = 2000;
 
 // =============================
 // HELPERS
@@ -90,15 +95,15 @@ void updateOLED(float temp, float voltage, float current, const char* status) {
 
 void triggerAlert() {
   alertMode = true;
-  setLedColor(true, false, false); // red
+  setLedColor(true, false, false); // Red
   digitalWrite(PIN_BUZZER, HIGH);
-  delay(200);                      // short beep
+  delay(200);                      // Short beep
   digitalWrite(PIN_BUZZER, LOW);
 }
 
 void clearAlert() {
   alertMode = false;
-  setLedColor(false, true, false); // green
+  setLedColor(false, true, false); // Green
   digitalWrite(PIN_BUZZER, LOW);
 }
 
@@ -115,11 +120,12 @@ void setup() {
   pinMode(PIN_LED_G, OUTPUT);
   pinMode(PIN_LED_B, OUTPUT);
 
-  // Start in normal state
+  // Initial normal status
   digitalWrite(PIN_BUZZER, LOW);
-  setLedColor(false, true, false); // green
+  setLedColor(false, true, false); // Green
 
   dht.begin();
+  randomSeed(micros());
   Wire.begin();
   u8g2.begin();
 
@@ -127,13 +133,9 @@ void setup() {
   delay(1000);
 }
 
-
 // =============================
 // LOOP
 // =============================
-
-unsigned long lastSend = 0;
-const unsigned long SEND_INTERVAL_MS = 2000;
 
 void loop() {
   float temp = 0.0;
@@ -142,67 +144,76 @@ void loop() {
 
 #if DEMO_MODE == true
   // HARDCODED DEMO VALUES
-
   if (DEMO_SCENARIO == 0) {
     // Normal operation
     temp = 28.0;
     simVoltage = 230.0;
     simCurrent = 1.2;
-
   } else if (DEMO_SCENARIO == 1) {
     // Slightly high power (suspicious)
     temp = 35.0;
     simVoltage = 235.0;
     simCurrent = 4.0;
-
   } else if (DEMO_SCENARIO == 2) {
     // Extreme power spike (clear anomaly)
     temp = 45.0;
     simVoltage = 250.0;
     simCurrent = 9.5;
-
   } else if (DEMO_SCENARIO == 3) {
-    // "Unauthorized" meter scenario
+    // Unauthorized meter scenario
     temp = 30.0;
     simVoltage = 230.0;
     simCurrent = 2.0;
   }
-
 #else
-  // LIVE SENSOR MODE
+  // LIVE SENSOR MODE: use random values for a self-running presentation.
+#if RANDOM_VALUES
+  temp = random(200, 351) / 10.0;                // 20.0–35.0 °C
+  simVoltage = random(2200, 2401) / 10.0;         // 220.0–240.0 V
+  simCurrent = random(50, 551) / 100.0;           // 0.50–5.50 A
+#else
   float t = dht.readTemperature();
   if (!isnan(t)) {
     temp = t;
   }
-
   int potVal = analogRead(PIN_POT);
-  simVoltage = 220.0 + (potVal / 4095.0) * 20.0; // ~220–240 V
-  simCurrent = 0.5 + (potVal / 4095.0) * 5.0;    // ~0.5–5.5 A
+  simVoltage = 220.0 + (potVal / 4095.0) * 20.0;
+  simCurrent = 0.5 + (potVal / 4095.0) * 5.0;
+#endif
 #endif
 
-  float simPower = simVoltage * simCurrent / 1000.0; // kW (demo scaling)
+  float simPower = (simVoltage * simCurrent) / 1000.0; // kW
 
-  // Button press = alert condition (momentary)
-  bool buttonPressed = (digitalRead(PIN_BTN) == LOW);
+  // Button Read & Debounce Logic
+  bool reading = digitalRead(PIN_BTN);
+  if (reading != lastBtnState) {
+    lastDebounceTime = millis();
+  }
+
+  if ((millis() - lastDebounceTime) > DEBOUNCE_DELAY_MS) {
+    currentBtnState = reading;
+  }
+  lastBtnState = reading;
+
+  // Active-LOW button detection
+  bool buttonPressed = (currentBtnState == LOW);
 
   if (buttonPressed) {
-    // Alert condition: red LED + buzzer ON
-    setLedColor(true, false, false); // red
+    setLedColor(true, false, false); // Red
     digitalWrite(PIN_BUZZER, HIGH);
   } else {
-    // Normal condition: green LED + buzzer OFF
-    setLedColor(false, true, false); // green
+    setLedColor(false, true, false); // Green
     digitalWrite(PIN_BUZZER, LOW);
   }
 
   const char* status = buttonPressed ? "ALERT" : "OK";
   updateOLED(temp, simVoltage, simCurrent, status);
 
+  // Send Telemetry Payload
   unsigned long now = millis();
   if (now - lastSend >= SEND_INTERVAL_MS) {
     lastSend = now;
 
-    // JSON telemetry
     Serial.print("{\"meter_id\":\"");
     Serial.print(METER_ID);
     Serial.print("\",\"temp_c\":");
@@ -218,5 +229,5 @@ void loop() {
     Serial.println("}");
   }
 
-  delay(50);
+  delay(20);
 }

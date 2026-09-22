@@ -3,3 +3,4 @@ pandas
 plotly>=5.20
 reportlab
 paho-mqtt>=2.0
+pyserial
