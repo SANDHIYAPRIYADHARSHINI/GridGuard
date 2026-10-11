@@ -77,19 +77,23 @@ Wokwi ESP32 Meter B ──┘
 
 ---
 
-## Demo Scenarios
+## Meter A Viva Scenarios
 
-Each meter supports four demo scenarios (configured via `DEMO_MODE` and `DEMO_SCENARIO`):
+Meter A starts in button-controlled demo mode. Press and release its push button once to advance to the next scenario. The serial JSON includes the scenario name, and the dashboard shows the resulting gateway response. No rebuild is needed between scenarios.
 
-| Scenario | Temperature | Voltage | Current | Purpose |
-|----------|-------------|---------|---------|---------|
-| 0 | 28 °C | 230 V | 1.2 A | Normal operation |
-| 1 | 35 °C | 235 V | 4.0 A | Slightly high power (suspicious) |
-| 2 | 45 °C | 250 V | 9.5 A | Extreme power spike (anomaly) |
-| 3 | 30 °C | 230 V | 2.0 A | Unauthorized meter demo |
+| Scenario | Values | Meaning and expected gateway response |
+|----------|--------|----------------------------------------|
+| 0 normal | 28 °C, 230 V, 1.2 A | Healthy baseline; accepted without an alert |
+| 1 voltage_warning | 28 °C, 246 V, 1.2 A | Voltage outside the normal band; medium warning |
+| 2 current_warning | 35 °C, 235 V, 4.0 A | Elevated current and power; warnings are flagged |
+| 3 temperature_critical | 45 °C, 230 V, 1.2 A | Temperature exceeds the critical threshold |
+| 4 power_critical | 45 °C, 250 V, 9.5 A | Extreme current, voltage, temperature, and power; may auto-isolate after repeated packets |
+| 5 unauthorized | 30 °C, 230 V, 2.0 A, ID MTR-999 | Device allow-list rejection; critical unauthorized-device event |
+| 6 meter_alert | 30 °C, 230 V, 2.0 A, alert=true | Meter reports a local fault/tamper alert; medium event |
 
-- Meter A is configured for normal operation (scenario 0).
-- Meter B is configured for normal operation by default, with the push button used to simulate an attack (e.g., sending an unauthorized meter ID or extreme values).
+Power is calculated as `voltage × current / 1000`, so the values above are approximately 0.28, 0.30, 0.94, 0.28, 2.38, 0.46, and 0.46 kW respectively.
+
+To use real simulated sensors instead, set `DEMO_MODE` to `false` in Meter A's `src/main.cpp`, rebuild, and restart Wokwi. The potentiometer controls voltage/current and the DHT22 controls temperature.
 
 ---
 
