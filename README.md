@@ -1,208 +1,222 @@
-GridGuard
+# GridGuard
 
-Secure smart meter and substation monitoring system
+Smart meter monitoring and cybersecurity demonstration with a live operator dashboard.
 
-GridGuard is a smart-grid cybersecurity prototype. Simulated ESP32 smart meters send telemetry to a security gateway. The gateway checks every packet, detects attacks and faulty meters, isolates a suspicious meter, and logs everything. A web dashboard shows the live grid, the alerts, and the meter inventory.
+GridGuard receives telemetry from two registered meters, checks message authenticity and sensor readings, detects suspicious activity, and isolates affected meters while healthy meters continue operating. It supports a built-in simulator, signed ESP32 telemetry from Wokwi, and Arduino UNO R4 WiFi boards with DHT22 sensors.
 
-Safety note: GridGuard is a defensive, educational prototype. All attacks are simulated inside the gateway software on one machine. It does not jam Wi-Fi, impersonate devices on a real network, disrupt anything, or switch real electrical loads.
+The current application uses **React, TypeScript, Express, and Vite**. No Python gateway or Streamlit installation is required.
 
-Problem
+## Features
 
-Smart meters continuously send voltage, current, power and temperature readings to a substation or control centre. If an unauthorised device injects data, a message is altered or replayed, or a meter starts reporting abnormal values, the operator must notice quickly and isolate that meter without shutting down the healthy ones.
+- Live voltage, current, power, temperature, and cumulative energy monitoring for `MTR-001` and `MTR-002`.
+- Device allow-list, HMAC-SHA256 verification, sequence and timestamp checks, and per-meter rate limiting.
+- Rule-based detection of abnormal readings, power inconsistencies, sudden spikes, and energy rollback.
+- Automatic isolation after repeated high or critical anomalies, plus manual isolation and restoration.
+- Attack scenarios for unauthorized devices, altered messages, replay, compromised meters, energy rollback, and flooding.
+- Live interception of Wokwi bridge traffic, with original and modified packets and gateway verdicts.
+- Security event inspection, CSV exports, and a printable incident report that can be saved as PDF through the browser.
 
-GridGuard demonstrates this with two simulated meters, a gateway that validates and monitors their data, and an operator dashboard.
+## Quick start
 
-What it does
-Accepts telemetry only from registered meters (device allow-list).
-Verifies each message with an HMAC-SHA256 signature.
-Rejects replayed messages (sequence number and timestamp checks) and floods (rate limit).
-Flags abnormal readings: voltage, current, power and temperature limits, sudden spikes, power that does not match voltage × current, and cumulative energy that goes backwards.
-Isolates a faulty meter automatically (or on the operator's command) while healthy meters keep running.
-Stores every event with time, meter, severity, reason, raw packet, source and meter state.
-Shows all of this in a live dashboard, with CSV and PDF reports.
-Architecture
-text
- Simulated ESP32 meters (Wokwi)          Built-in simulator + Attack simulation page
-   Meter A (MTR-001)                                   |
-   Meter B (MTR-002)                                   |
-        |  JSON telemetry                              |
-        |  (serial output pasted into the gateway;     |
-        |   MQTT listener available, not yet used      |
-        |   by the firmware)                           |
-        +---------------------+------------------------+
-                              v
-              Gateway engine  (gateway/core.py)
-   allow-list -> isolation check -> rate limit -> HMAC -> replay
-        -> plausibility and threshold rules -> auto-isolation
-                              |
-                              v
-                 SQLite database  (logs/gridguard.db)
-                              |
-                              v
-              Streamlit dashboard  (dashboard/app.py)
-Quick start
+Use Node.js 22 or newer with npm. Run these commands from the repository root:
 
-Requirements: Python 3.9 or newer.
+```sh
+npm ci
+npm run dev
+```
 
-bash
-pip install -r requirements.txt
-streamlit run dashboard/app.py
+Open **http://localhost:3000**. The built-in simulator starts automatically and populates both meters; no hardware is needed.
 
-Run the command from the repository root. The dashboard opens at http://localhost:8501. A built-in simulator is switched on by default, so both meters show live data immediately.
+On Windows, use `npm.cmd` if PowerShell blocks `npm.ps1`.
 
-Demo flow
-Overview: both meters online, live charts.
-Attack simulation: with Meter B selected, run Unauthorized Meter, Tampered Message and Replay Attack. Each is rejected, and the page shows the reason.
-Run Compromised Meter. The gateway flags the extreme readings and isolates Meter B while Meter A keeps running.
-Alerts: open an event to see the raw packet behind it.
-Meters: press Restore to service to bring Meter B back.
-Reports: download the CSV files or create the PDF report.
-Using the Wokwi meters
+To choose another port:
 
-Turn off Use built-in simulator in the sidebar. Copy a JSON line from a Wokwi serial monitor and paste it into the box at the bottom of the Attack simulation page, or run the command-line gateway in a second terminal:
+```sh
+npm run dev -- --port 3001
+```
 
-bash
-python gateway/gateway_r2.py                    # paste JSON lines from the serial monitors
-python gateway/gateway_r2.py --simulate         # headless simulated traffic
-python gateway/gateway_r2.py --strict           # reject unsigned packets
-python gateway/gateway_r2.py --mqtt HOST --topic YOUR/UNIQUE/TOPIC   # MQTT (untested)
+The server uses `--port`, then `DEFAULT_APP_PORT`, then `3000`. The current implementation ignores `--port 8080`. The `PORT` entry in `.env.example` is not read by the server, and `.env` files are not loaded automatically.
 
-The command-line gateway and the dashboard use the same database, so events appear in the dashboard either way.
+## Try the demonstration
 
-Tests
-bash
-python -m pytest -q
-Simulated attack scenarios
+1. Open **Overview** to inspect the two meters, live readings, and packet counters.
+2. Open **Attack simulation**, select Meter B, and try Unauthorized Meter, Tampered Message, and Replay Attack. Inspect each rejection and its reason.
+3. Run **Compromised Meter** with automatic isolation enabled. Repeated severe readings isolate Meter B while Meter A continues.
+4. Review the resulting events in **Alerts**.
+5. Restore Meter B from **Meters**.
+6. Use **Reports** to export telemetry and events or print an incident summary.
 
-All scenarios run from the Attack simulation page.
+The sidebar controls the simulator, strict HMAC verification, automatic isolation, refresh settings, and the live MITM attacker. The **Live interception** page operates on incoming Wokwi bridge packets; it needs a running Wokwi meter and bridge.
 
-Scenario	What is simulated	Gateway response
-Unauthorized Meter	A device with ID MTR-999 sends telemetry	Rejected, critical alert
-Tampered Message	A valid packet is edited after it was signed	Rejected, HMAC mismatch
-Replay Attack	An earlier genuine packet is sent again	Rejected, sequence already used
-Compromised Meter	A meter with a valid key sends extreme values (3 packets)	Flagged, meter auto-isolated
-Energy Rollback	A meter's cumulative energy reading goes backwards	Flagged as a high-severity anomaly
-Message Flood	15 packets in a burst	Rate-limit alert
-Normal packet	A correctly signed reading within limits	Accepted, no alert
-Security controls
-Control	Rule	Result
-Device allow-list	Only MTR-001 and MTR-002 may send data	Reject, critical
-Message signature	HMAC-SHA256 over the packet fields, one key per meter	Reject, critical
-Replay protection	Sequence number must increase; timestamp within 30 s	Reject, high
-Rate limit	More than 8 packets in 5 s from one meter	Reject, high
-Sensor plausibility	Voltage 0–1000 V, current up to 100 A, temperature −40 to 150 °C	Reject, critical
-Voltage	Warn outside 216–244 V, critical outside 200–255 V	Flag
-Current	Warn above 3.5 A, critical above 8 A	Flag
-Temperature	Warn above 33 °C, critical above 42 °C	Flag
-Power	Warn above 0.8 kW, critical above 1.8 kW	Flag
-Power consistency	Reported kW may not exceed voltage × current	Flag, high
-Energy rollback	Cumulative energy_wh may not decrease	Flag, high
-Sudden spike	Power above 2.5× the recent average	Flag, medium
-Meter self-alert	Meter sends "alert": true	Flag, medium
-Auto-isolation	3 high or critical packets from one meter within 60 s	Meter isolated
+## Meter connections
 
-Notes on the design:
+### Built-in simulator
 
-Packets that fail authentication never count toward isolation. Otherwise an attacker could get a healthy meter isolated by sending fake packets in its name.
-An isolated meter keeps sending, and the gateway drops its packets and counts them as blocked. An operator can restore it from the Meters page.
-The thresholds are demo values based on a 230 V supply. Real values would come from the utility's own standards.
-Message format
+The simulator signs packets using the gateway's configured meter keys. It yields to an external meter for that meter ID while live traffic is present. If traffic stops for approximately eight seconds, simulation can resume when the simulator remains enabled. Disable the simulator when you need to observe hardware loss of signal without fallback data.
 
-Telemetry is a JSON line. Fields marked optional can be left out (the Review 1 firmware sends only the first seven).
+### Wokwi ESP32 meters
 
-json
-{"meter_id":"MTR-001","seq":42,"ts":1789800000,"temp_c":28.1,"voltage_v":230.2,"current_a":1.24,
- "power_kw":0.29,"alert":false,"energy_wh":15.62,"hmac":"<64 hex characters>"}
+See [WOKWI.md](WOKWI.md) for PlatformIO builds, Wokwi setup, serial bridge options, and meter scenarios. Use the signed firmware in `prototype r2`; `prototype r1` contains the earlier prototype.
 
-seq, ts, energy_wh and hmac are optional. The signature is HMAC-SHA256 over the printed text of these fields, joined by |:
+The checked-in Wokwi firmware uses different demo keys from the gateway defaults. In a PowerShell terminal, set matching keys **before starting the gateway**:
 
+```powershell
+$env:GG_KEY_MTR001 = 'gridguard-demo-key-A'
+$env:GG_KEY_MTR002 = 'gridguard-demo-key-B'
+npm.cmd run dev
+```
+
+Start the Wokwi simulations for Meter A and Meter B, then run the bridge in a second terminal:
+
+```sh
+npm run bridge
+```
+
+The bridge connects to local serial TCP ports `4000` and `4001` and forwards packets to `http://localhost:3000`. For a different gateway port:
+
+```sh
+npm run bridge -- --url http://localhost:3001
+```
+
+The bridge also synchronizes meter clocks, sequences, and energy baselines, and sends isolation state back to the simulated meters. The live MITM attacker affects this serial ingest path; disable it for a clean telemetry demonstration.
+
+### Arduino UNO R4 WiFi meters
+
+See [ARDUINO.md](ARDUINO.md) for wiring, network configuration, PlatformIO upload instructions, LED behavior, and testing. The shared firmware project is `hardware/uno-r4`, with `meter-a` and `meter-b` build environments.
+
+These boards measure temperature and humidity with DHT22 sensors. Voltage, current, power, and energy are simulated. They send signed JSON directly over HTTP to `/api/telemetry`, bypassing the Wokwi interception path.
+
+The firmware's literal demo keys are `GG_KEY_MTR001` and `GG_KEY_MTR002`, matching the current gateway defaults. If environment variables override the gateway keys, configure the firmware to match or restart the gateway with the matching values. Do not run Arduino and Wokwi streams with the same meter ID simultaneously.
+
+## Configuration
+
+Set environment variables in the terminal that starts the server:
+
+```powershell
+$env:GG_KEY_MTR001 = 'your-meter-a-key'
+$env:GG_KEY_MTR002 = 'your-meter-b-key'
+$env:DEFAULT_APP_PORT = '3000'
+npm.cmd run dev
+```
+
+- `GG_KEY_MTR001`: HMAC key for Meter A; defaults to the literal string `GG_KEY_MTR001`.
+- `GG_KEY_MTR002`: HMAC key for Meter B; defaults to the literal string `GG_KEY_MTR002`.
+- `DEFAULT_APP_PORT`: listening port when `--port` is absent.
+- `NODE_ENV=production`: serves the built frontend from `dist/`.
+- `GATEWAY_URL`: optional bridge destination; defaults to `http://localhost:3000` and can be overridden with the bridge's `--url` argument.
+
+Restart the server after changing keys. `.env.example` contains Wokwi demo key values as a reference; copying it to `.env` alone does not configure this application. Keep real secrets and Wi-Fi credentials out of commits.
+
+## Security checks
+
+The engine in [src/server/engine.ts](src/server/engine.ts) applies these checks:
+
+- **Registration and isolation:** reject unknown meter IDs and block packets from isolated meters.
+- **Rate limit:** reject more than eight packets from a meter within five seconds. Controlled `attack-sim` and `mitm-interceptor` sources bypass this check.
+- **Authentication:** verify supplied HMAC signatures. Unsigned packets are accepted by default for compatibility; enable strict HMAC mode to require signatures.
+- **Replay checks:** when supplied, sequence numbers must increase and timestamps must be within 30 seconds of gateway time.
+- **Plausibility:** reject voltage outside 0–1000 V, current outside 0–100 A, temperature outside -40–150 °C, negative power, and invalid numeric readings.
+- **Thresholds:** warn outside 216–244 V or above 3.5 A, 33 °C, or 0.8 kW; mark readings critical outside 200–255 V or above 8 A, 42 °C, or 1.8 kW.
+- **Consistency:** flag excessive power relative to voltage times current, cumulative energy rollback, sudden power increases, and meter-reported alerts.
+- **Automatic isolation:** three accepted packets with high or critical findings within 60 seconds isolate the meter when enabled. Authentication failures do not add isolation strikes.
+
+Thresholds are demonstration values for a nominal 230 V supply. Isolation blocks gateway ingestion; it does not disconnect an electrical load.
+
+## Telemetry and signing
+
+A signed telemetry packet has this shape. Replace the timestamp with current Unix seconds, advance the sequence, and calculate the HMAC before sending:
+
+```json
+{
+  "meter_id": "MTR-001",
+  "seq": 42,
+  "ts": 1793577600,
+  "temp_c": 28.1,
+  "voltage_v": 230.2,
+  "current_a": 1.24,
+  "power_kw": 0.2854,
+  "alert": false,
+  "energy_wh": 15.62,
+  "hmac": "<64-character hexadecimal HMAC-SHA256>"
+}
+```
+
+The gateway joins fields in this order with `|`:
+
+```text
 meter_id|seq|ts|temp_c|voltage_v|current_a|power_kw|alert|energy_wh
+```
 
-Fields that are absent are signed as an empty string. Signing the printed text (for example 28.1, not the number 28.1) avoids float-formatting differences between C++ and Python. Demo keys are in gateway/core.py and can be overridden with the environment variables GG_KEY_MTR001 and GG_KEY_MTR002. Real keys must never be committed to the repository.
+Numeric signing uses fixed decimal precision: temperature and voltage use two places, current three, power four, and energy two. The alert token is `true` or `false`. For the example above, the signed text is:
 
-By default the gateway still accepts unsigned packets, so the Review 1 firmware keeps working. Turn on Require signed packets in the sidebar (or use --strict) to reject them.
+```text
+MTR-001|42|1793577600|28.10|230.20|1.240|0.2854|false|15.62
+```
 
-Dashboard pages
-Page	Contents
-Overview	Meters online, grid load, packet counters, meter cards, live charts (power, current, voltage, temperature, energy), recent events
-Alerts	Filterable event table, charts by severity, type and time, event details with the raw packet
-Meters	Asset inventory, isolate and restore buttons, unregistered devices seen, list of gateway rules
-Attack simulation	One-click attack scenarios with the gateway's verdict, paste box for Wokwi serial output
-Reports	CSV export of events and telemetry, PDF incident report, data reset
-Project structure
-text
-GridGuard/
-├── prototype r1/                 # Wokwi and PlatformIO projects for the two simulated meters
-│   ├── meter-a/                  # src/main.cpp, diagram.json, wokwi.toml, platformio.ini
-│   ├── meter-b/
-│   └── README.md
-├── gateway/
-│   ├── core.py                   # security engine: checks, anomaly rules, isolation, SQLite
-│   ├── simulator.py              # normal meter traffic and the attack scenarios
-│   ├── gateway_r2.py             # command-line gateway (serial paste, simulator, MQTT)
-│   ├── gateway_r1.py             # Review 1 gateway
-│   └── __init__.py
-├── dashboard/
-│   ├── app.py                    # Streamlit dashboard
-│   ├── theme.py                  # styling and HTML helpers
-│   ├── reporting.py              # PDF report
-│   └── __init__.py
-├── tests/test_core.py
-├── .streamlit/config.toml        # dashboard theme
-├── architecture.txt
-├── requirements.txt
-└── README.md
+Use `canonical()` and `signHmac()` in the engine as the implementation reference. Humidity and source metadata are outside this authenticated field set.
 
-logs/gridguard.db is created when the app first runs and is not committed.
+## API entry points
 
-Meter hardware (simulated)
+The Express server hosts both the dashboard and JSON API:
 
-Each simulated meter is an ESP32 running in Wokwi inside VS Code, with:
+- `GET /api/status`, `/api/meters`, `/api/telemetry`, and `/api/events`: current state and recorded data.
+- `POST /api/telemetry`: direct hardware JSON telemetry.
+- `POST /api/ingest`: a packet wrapper with `packet`, `source`, and `addr`; the bridge uses source `serial`.
+- `GET /api/time` and `/api/sync/:id`: clock and meter synchronization.
+- `POST /api/session/start`: Arduino boot session synchronization.
+- `POST /api/attack` and `/api/mitm/simulate`: controlled attack demonstrations.
+- `GET /api/live-mitm` and `POST /api/live-mitm/strike`: interception status and next-packet controls.
+- `POST /api/meters/:id/isolate` and `/api/meters/:id/restore`: operator actions.
+- `GET /api/settings` and `POST /api/settings`: runtime settings.
+- `GET /api/export/events.csv` and `/api/export/telemetry.csv`: CSV downloads.
+- `POST /api/reset`: clears engine and interception state and seeds new simulator readings.
 
-DHT22 temperature sensor
-Potentiometer for simulated voltage and current
-SSD1306 OLED display
-RGB LED and buzzer for alerts
-Push button to simulate an alert condition
+See [server.ts](server.ts) for request bodies and additional routes.
 
-The firmware has demo scenarios (normal, slightly high power, extreme power spike, unauthorised meter) chosen with DEMO_SCENARIO. It prints one JSON line every 2 seconds. A future version will use real ESP32 boards with low-voltage sensors (INA219 or PZEM-004T). The system will never connect directly to mains electricity.
+## Build and verification
 
-Technology
-Layer	Technology
-Meter simulation	Wokwi, VS Code, PlatformIO, Arduino C++ on ESP32
-Gateway	Python, SQLite
-Message security	HMAC-SHA256, sequence numbers, timestamps
-Anomaly detection	Rule-based thresholds and consistency checks
-Dashboard	Streamlit, Plotly, Pandas
-Reports	CSV, ReportLab (PDF)
-Current status and limits
-Feature	Status
-Allow-list, HMAC, replay protection, rate limit, anomaly rules, isolation	Done in the gateway
-Dashboard, attack simulation, CSV and PDF reports	Done
-Wokwi meters signing packets	Not yet. The firmware sends unsigned JSON without seq, ts or energy_wh
-Connection from Wokwi to the gateway	Manual (copy and paste). The MQTT listener is written but untested
-Isolation switching the meter's LED and buzzer	Not yet. The gateway does not send commands back to meters
-Source address in the event log	Stores the serial port, MQTT topic or operator, not a real client IP
-Machine-learning anomaly detection, TLS, dashboard login	Planned
+```sh
+npm run lint
+npm run build
+npx tsx tools/test-hardware-session.ts
+npx tsx tools/test-arduino.ts
+```
 
-The attacks and the normal traffic in the dashboard are generated by the built-in simulator, so signing and replay protection are demonstrated there, not by the Wokwi meters yet.
+`lint` runs TypeScript checking. The hardware session script checks session resets and security behavior; the Arduino script checks simulator handoff and the HTTP ingest path without requiring physical boards. Board upload and sensor checks are documented separately in [ARDUINO.md](ARDUINO.md).
 
-Future work
-Sign packets in the ESP32 firmware and add seq, ts and energy_wh.
-Send telemetry over MQTT (with TLS) instead of copying serial output.
-Send an isolation command back to the meter to drive its LED and buzzer.
-Train an anomaly model (for example Isolation Forest) on simulated normal and abnormal data.
-Add dashboard login, email or Telegram notifications, and physical boards with INA219 or PZEM-004T sensors.
-References
-NISTIR 7628 Rev. 1: Guidelines for Smart Grid Cybersecurity
-NIST Cybersecurity Framework Smart Grid Profile
-CISA guidance for industrial control system security and incident response
-Contributors
-Sandhiya Priyadharshini Ganesh
-Harshita Das
-Tarunya Modi
+To serve a production frontend build in PowerShell:
 
-# Arduino UNO R4 WiFi hardware
+```powershell
+npm.cmd run build
+$env:NODE_ENV = 'production'
+npm.cmd start
+```
 
-For two real Wi-Fi meters with DHT22 sensors, see [hardware setup and testing](ARDUINO.md).
-The existing Wokwi bridge remains available.
+`npm start` runs the TypeScript Express server through `tsx`; the build command bundles the frontend only. `npm run preview` previews the Vite build without starting the Express API, so use the Express server for the complete application.
+
+## Repository layout
+
+- `server.ts`: Express API, simulator loop, and frontend serving.
+- `src/server/engine.ts`: validation, signing, anomaly rules, isolation, and in-memory state.
+- `src/server/simulator.ts`: normal telemetry and controlled attack scenarios.
+- `src/server/liveMitm.ts`: interception of Wokwi serial traffic.
+- `src/App.tsx` and `src/components/`: dashboard, charts, alerts, meter controls, attack tools, and reports.
+- `tools/`: Wokwi bridge and hardware integration checks.
+- `hardware/uno-r4/`: Arduino UNO R4 WiFi firmware.
+- `prototype r2/`: signed Wokwi ESP32 meter firmware.
+- `prototype r1/`: earlier Wokwi prototype.
+- `ARDUINO.md` and `WOKWI.md`: connection-specific setup guides.
+
+## Scope and limitations
+
+GridGuard is an educational defensive prototype. Attack demonstrations modify application packets inside the lab; they do not jam wireless networks or switch real electrical loads.
+
+Telemetry, events, counters, and meter state are held **in memory**, with up to 5,000 telemetry points and 3,000 events retained. Restarting the server loses this history. Export data before restarting or resetting.
+
+The server listens on all network interfaces, permits CORS, and has no dashboard login, API authorization, or TLS. Session and operator endpoints are intended for a trusted demonstration network. HMAC protects the listed telemetry fields; it does not authenticate operator API actions. Persistent storage, authenticated access, encrypted transport, and deployment hardening remain future work.
+
+## Contributors
+
+- Sandhiya Priyadharshini Ganesh
+- Harshita Das
+- Tarunya Modi
