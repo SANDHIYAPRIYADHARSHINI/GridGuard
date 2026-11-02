@@ -1,0 +1,6 @@
+{
+  "name": "GridGuard",
+  "description": "Secure smart meter and substation monitoring system with real-time cybersecurity threat detection, HMAC verification, replay protection, and automated isolation.",
+  "permissions": [],
+  "capabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
